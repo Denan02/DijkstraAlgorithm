@@ -16,9 +16,7 @@ public:
       if(i-1 < 0 || niz[temp] < niz[i]) {
         break;
       }else {
-        double temp2 = niz[i];
-        niz[i] = niz[temp];
-        niz[temp] = temp2;
+        std::swap(niz[i], niz[temp]);
         i = temp;
       }
     }
@@ -82,7 +80,5 @@ int main()
   std::cout << m.getMin() << " ";
   m.ispisi();
     std::cout << "\n";
-  std::cout << m.getMin() << " ";
-  m.ispisi();
   return 0;
 }
