@@ -1,0 +1,19 @@
+# Build output folders
+bin/
+obj/
+.vscode/
+output/
+
+# IDE specifični fajlovi (Code::Blocks)
+*.layout
+*.depend
+*.cbp
+
+# Log i privremeni fajlovi
+*.log
+*.tmp
+
+*.txt
+
+*.exe
+*.md
