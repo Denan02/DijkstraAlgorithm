@@ -3,6 +3,9 @@
 #include <limits>
 #include <unordered_map>
 #include <cmath>
+#include <chrono>
+#include <sstream>
+#include <fstream>
 
 //-------------------MinHeap--------------------//
 template<typename T>
@@ -52,223 +55,456 @@ public:
 };
 
 //-------------------Fibonacci Heap--------------------//
-struct FibNode {
-    int key;
-    double value;
-    int degree = 0;
-    bool mark = false;
-    FibNode *parent = nullptr, *child = nullptr, *left = nullptr, *right = nullptr;
+template<class T, class Comp = std::less<T>>
+class FibHeap
+{
+ public:
 
-    FibNode(int k, double v) : key(k), value(v) {
-        left = right = this;
-    }
-};
-
-class FibHeap {
-private:
-    FibNode* minNode = nullptr;
-    int n = 0;
-    std::unordered_map<int, FibNode*> nodeMap;
-
-    void clear(FibNode* x) {
-        if (x) {
-            FibNode* start = x;
-            FibNode* curr = x;
-            do {
-                FibNode* next = curr->right;
-                clear(curr->child);
-                delete curr;
-                curr = next;
-            } while (curr != start);
-        }
+  // node
+  class FibNode
+  {
+  public:
+    FibNode(T k, void *pl)
+      :key(std::move(k)),mark(false),p(nullptr),left(nullptr),right(nullptr),child(nullptr),degree(-1),payload(pl)
+    {
     }
 
-    void link(FibNode* y, FibNode* x) {
-        y->left->right = y->right;
-        y->right->left = y->left;
+    ~FibNode()
+      {
+      }
 
-        y->parent = x;
-        if (!x->child) {
-            x->child = y;
-            y->left = y->right = y;
-        } else {
-            y->left = x->child;
-            y->right = x->child->right;
-            x->child->right->left = y;
-            x->child->right = y;
-        }
-        x->degree++;
-        y->mark = false;
+    T key;
+    bool mark;
+    FibNode *p;
+    FibNode *left;
+    FibNode *right;
+    FibNode *child;
+    int degree;
+    void *payload;
+  }; // end FibNode
+
+  FibHeap() : FibHeap(std::less<T>())
+    {
     }
 
-    void consolidate() {
-        int max_D = (n > 0) ? (int)(std::log(n) / std::log(1.618)) + 2 : 1;
-        std::vector<FibNode*> A(max_D, nullptr);
+  FibHeap(Comp comp)
+      :n(0), min(nullptr), comp(comp)
+  {
+  }
 
-        if (!minNode) return;
-
-        std::vector<FibNode*> rootList;
-        FibNode* curr = minNode;
-        do {
-            rootList.push_back(curr);
-            curr = curr->right;
-        } while (curr != minNode);
-
-        for (FibNode* w : rootList) {
-            FibNode* x = w;
-            int d = x->degree;
-            while (d < max_D && A[d]) {
-                FibNode* y = A[d];
-                if (x->value > y->value) std::swap(x, y);
-                link(y, x);
-                A[d] = nullptr;
-                d++;
-            }
-            if (d < max_D) A[d] = x;
-        }
-
-        minNode = nullptr;
-        for (FibNode* node : A) {
-            if (node) {
-                if (!minNode) {
-                    minNode = node;
-                    node->left = node->right = node;
-                } else {
-                    node->left = minNode;
-                    node->right = minNode->right;
-                    minNode->right->left = node;
-                    minNode->right = node;
-                    if (node->value < minNode->value) minNode = node;
-                }
-            }
-        }
+  ~FibHeap()
+    {
+      clear();
     }
 
-    void cut(FibNode* x, FibNode* y) {
+  void clear() {
+      // delete all nodes.
+      delete_fibnodes(min);
+      min = nullptr;
+      n = 0;
+  }
 
-        if (x->right == x) {
-            y->child = nullptr;
-        } else {
-            x->left->right = x->right;
-            x->right->left = x->left;
-            if (y->child == x) y->child = x->right;
-        }
-        y->degree--;
+  void delete_fibnodes(FibNode *x)
+  {
+    if (!x)
+      return;
 
+    FibNode *cur = x;
+    while(true)
+      {
+	/*std::cerr << "cur: " << cur << std::endl;
+	  std::cerr << "x: " << x << std::endl;*/
+	if (cur->left && cur->left != x)
+	  {
+	    //std::cerr << "cur left: " << cur->left << std::endl;
+	    FibNode *tmp = cur;
+	    cur = cur->left;
+	    if (tmp->child)
+	      delete_fibnodes(tmp->child);
+	    delete tmp;
+	  }
+	else
+	  {
+	    if (cur->child)
+	      delete_fibnodes(cur->child);
+	    delete cur;
+	    break;
+	  }
+      }
+  }
+  void insert(FibNode *x)
+  {
+    // 1
+    x->degree = 0;
+    // 2
+    x->p = nullptr;
+    // 3
+    x->child = nullptr;
+    // 4
+    x->mark = false;
+    // 5
+    if ( min == nullptr)
+      {
+	// 6, 7
+	min = x->left = x->right = x;
+      }
+    else
+      {
+	// 8
+	min->left->right = x;
+	x->left = min->left;
+	min->left = x;
+	x->right = min;
+	// 9
+	if ( comp(x->key, min->key) )
+	  {
+	    // 10
+	    min = x;
+	  }
+      }
+    // 11
+    ++n;
+  }
 
-        x->left = minNode;
-        x->right = minNode->right;
-        minNode->right->left = x;
-        minNode->right = x;
+  /*
+   * The minimum node of the heap.
+   */
+  FibNode* minimum()
+  {
+    return min;
+  }
 
-        x->parent = nullptr;
-        x->mark = false;
-    }
+  static FibHeap* union_fibheap(FibHeap *H1, FibHeap *H2)
+  {
+    // 1
+    FibHeap* H = new FibHeap();
+    // 2
+    H->min = H1->min;
+    // 3
+    if ( H->min != nullptr && H2->min != nullptr )
+      {
+	H->min->right->left = H2->min->left;
+	H2->min->left->right = H->min->right;
+	H->min->right = H2->min;
+	H2->min->left = H->min;
+      }
+    // 4
+    if ( H1->min == nullptr || ( H2->min != nullptr && H1->comp(H2->min->key, H1->min->key) ) )
+      {
+	// 5
+	H->min = H2->min;
+      }
+    // 6
+    H->n = H1->n + H2->n;
+    // 7
+    return H;
+  }
 
-    void cascadingCut(FibNode* y) {
-        FibNode* z = y->parent;
-        if (z) {
-            if (!y->mark) {
-                y->mark = true;
-            } else {
-                cut(y, z);
-                cascadingCut(z);
-            }
-        }
-    }
+  FibNode* extract_min()
+  {
+    FibNode *z, *x, *next;
+    FibNode ** childList;
 
-public:
-    FibHeap() = default;
+    // 1
+    z = min;
+    // 2
+    if ( z != nullptr )
+      {
+	// 3
+	x = z->child;
+	if ( x != nullptr )
+	  {
+	    childList = new FibNode*[z->degree];
+	    next = x;
+	    for ( int i = 0; i < (int)z->degree; i++ )
+	      {
+		childList[i] = next;
+		next = next->right;
+	      }
+	    for ( int i = 0; i < (int)z->degree; i++ )
+	      {
+		x = childList[i];
+		// 4
+		min->left->right = x;
+		x->left = min->left;
+		min->left = x;
+		x->right = min;
+		// 5
+		x->p = nullptr;
+	      }
+	    delete [] childList;
+	  }
+	// 6
+	z->left->right = z->right;
+	z->right->left = z->left;
+	// 7
+	if ( z == z->right )
+	  {
+	    // 8
+	    min = nullptr;
+	  }
+	else
+	  {
+	    // 9
+	    min = z->right;
+	    // 10
+	    consolidate();
+	  }
+	// 11
+	n--;
+      }
+    // 12
+    return z;
+  }
+  void consolidate()
+  {
+    FibNode* w, * next, * x, * y, * temp;
+    FibNode** A, ** rootList;
+    // Max degree <= log base golden ratio of n
+    int d, rootSize;
+    int max_degree = static_cast<int>(floor(log(static_cast<double>(n))/log(static_cast<double>(1 + sqrt(static_cast<double>(5)))/2)));
 
-    ~FibHeap() {
-        clear(minNode);
-    }
+    // 1
+    A = new FibNode*[max_degree+2]; // plus two both for indexing to max degree and so A[max_degree+1] == NIL
+    // 2, 3
+    std::fill_n(A, max_degree+2, nullptr);
+    // 4
+    w = min;
+    rootSize = 0;
+    next = w;
+    do
+      {
+	rootSize++;
+	next = next->right;
+      } while ( next != w );
+    rootList = new FibNode*[rootSize];
+    for ( int i = 0; i < rootSize; i++ )
+      {
+	rootList[i] = next;
+	next = next->right;
+      }
+    for ( int i = 0; i < rootSize; i++ )
+      {
+	w = rootList[i];
+	// 5
+	x = w;
+	// 6
+	d = x->degree;
+	// 7
+	while ( A[d] != nullptr )
+	  {
+	    // 8
+	    y = A[d];
+	    // 9
+	    if ( comp(y->key, x->key) )
+	      {
+		// 10
+		temp = x;
+		x = y;
+		y = temp;
+	      }
+	    // 11
+	    fib_heap_link(y,x);
+	    // 12
+	    A[d] = nullptr;
+	    // 13
+	    d++;
+	  }
+	// 14
+	A[d] = x;
+      }
+    delete [] rootList;
+    // 15
+    min = nullptr;
+    // 16
+    for ( int i = 0; i < max_degree+2; i++ )
+      {
+	// 17
+	if ( A[i] != nullptr )
+	  {
+	    // 18
+	    if ( min == nullptr )
+	      {
+		// 19, 20
+		min = A[i]->left = A[i]->right = A[i];
+	      }
+	    else
+	      {
+		// 21
+		min->left->right = A[i];
+		A[i]->left = min->left;
+		min->left = A[i];
+		A[i]->right = min;
+		// 22
+		if ( comp(A[i]->key, min->key) )
+		  {
+		    // 23
+		    min = A[i];
+		  }
+	      }
+	  }
+      }
+    delete [] A;
+  }
+  void fib_heap_link( FibNode* y, FibNode* x )
+  {
+    // 1
+    y->left->right = y->right;
+    y->right->left = y->left;
+    // 2
+    if ( x->child != nullptr )
+      {
+	x->child->left->right = y;
+	y->left = x->child->left;
+	x->child->left = y;
+	y->right = x->child;
+      }
+    else
+      {
+	x->child = y;
+	y->right = y;
+	y->left = y;
+      }
+    y->p = x;
+    x->degree++;
+    // 3
+    y->mark = false;
+  }
+  void decrease_key( FibNode* x, T k )
+  {
+    FibNode* y;
 
-    void insert(int key, double value) {
-        FibNode* node = new FibNode(key, value);
-        nodeMap[key] = node;
-        if (!minNode) {
-            minNode = node;
-        } else {
-            node->left = minNode;
-            node->right = minNode->right;
-            minNode->right->left = node;
-            minNode->right = node;
-            if (node->value < minNode->value) minNode = node;
-        }
-        n++;
-    }
+    // 1
+    if ( comp(x->key, k) )
+      {
+	// 2
+	// error( "new key is greater than current key" );
+	return;
+      }
+    // 3
+    x->key = std::move(k);
+    // 4
+    y = x->p;
+    // 5
+    if ( y != nullptr && comp(x->key, y->key) )
+      {
+	// 6
+	cut(x,y);
+	// 7
+	cascading_cut(y);
+      }
+    // 8
+    if ( comp(x->key, min->key) )
+      {
+	// 9
+	min = x;
+      }
+  }
 
-    FibNode* extractMin() {
-        FibNode* z = minNode;
-        if (z) {
-            if (z->child) {
-                FibNode* child = z->child;
-                std::vector<FibNode*> children;
-                FibNode* curr = child;
-                do {
-                    children.push_back(curr);
-                    curr = curr->right;
-                } while (curr != child);
+  void cut( FibNode* x, FibNode* y )
+  {
+    // 1
+    if ( x->right == x )
+      {
+	y->child = nullptr;
+      }
+    else
+      {
+	x->right->left = x->left;
+	x->left->right = x->right;
+	if ( y->child == x )
+	  {
+	    y->child = x->right;
+	  }
+      }
+    y->degree--;
+    // 2
+    min->right->left = x;
+    x->right = min->right;
+    min->right = x;
+    x->left = min;
+    // 3
+    x->p = nullptr;
+    // 4
+    x->mark = false;
+  }
 
-                for (FibNode* x : children) {
-                    // Dodaj dete u root listu
-                    x->left = minNode;
-                    x->right = minNode->right;
-                    minNode->right->left = x;
-                    minNode->right = x;
-                    x->parent = nullptr;
-                }
-            }
+  void cascading_cut( FibNode* y )
+  {
+    FibNode* z;
 
-            z->left->right = z->right;
-            z->right->left = z->left;
+    // 1
+    z = y->p;
+    // 2
+    if ( z != nullptr )
+      {
+	// 3
+	if ( y->mark == false )
+	  {
+	    // 4
+	    y->mark = true;
+	  }
+	else
+	  {
+	    // 5
+	    cut(y,z);
+	    // 6
+	    cascading_cut(z);
+	  }
+      }
+  }
+  void remove_fibnode( FibNode* x )
+  {
+    decrease_key(x,std::numeric_limits<T>::min());
+    FibNode *fn = extract_min();
+    delete fn;
+  }
 
-            if (z == z->right) {
-                minNode = nullptr;
-            } else {
-                minNode = z->right;
-                consolidate();
-            }
-            n--;
-            nodeMap.erase(z->key);
-        }
-        return z;
-    }
+  bool empty() const
+  {
+    return n == 0;
+  }
 
-    void decreaseKey(int key, double newVal) {
-        // Ako ne postoji, pozovi insert
-        if (nodeMap.find(key) == nodeMap.end()) {
-            insert(key, newVal);
-            return;
-        }
-        FibNode* x = nodeMap[key];
-        if (newVal > x->value) return;
+  FibNode* topNode()
+  {
+    return minimum();
+  }
 
-        x->value = newVal;
-        FibNode* y = x->parent;
-        if (y && x->value < y->value) {
-            cut(x, y);
-            cascadingCut(y);
-        }
-        if (x->value < minNode->value) {
-            minNode = x;
-        }
-    }
+  T& top()
+  {
+    return minimum()->key;
+  }
 
-    void deleteNode(int key) {
-        decreaseKey(key, -1e18);
-        FibNode* z = extractMin();
-        if (z) delete z;
-    }
+  void pop()
+  {
+    if (empty())
+      return;
+    FibNode *x = extract_min();
+    if (x)
+      delete x;
+  }
 
-    bool empty() {
-        return minNode == nullptr;
-    }
+  FibNode* push(T k, void *pl)
+  {
+    FibNode *x = new FibNode(std::move(k),pl);
+    insert(x);
+    return x;
+  }
 
-    int size() {
-        return n;
-    }
+  FibNode* push(T k)
+  {
+    return push(std::move(k),nullptr);
+  }
+
+  unsigned int size()
+  {
+    return (unsigned int) n;
+  }
+
+  int n;
+  FibNode *min;
+  Comp comp;
+
 };
 
 //-------------------Graf--------------------//
@@ -280,6 +516,9 @@ public:
     cvorovi = svi;
   }
   double ShortestPathBinaryHeap(int cvor1, int cvor2) {
+    if(cvor2 > cvorovi.size() || cvor1 > cvorovi.size() || cvor2 < 0 || cvor1 < 0)
+      throw std::domain_error("Cvor ne postoji!");
+
     std::vector<std::pair<bool,double>> posjecen(cvorovi.size(), {false, std::numeric_limits<double>::infinity()});
     MinHrpa<double> hrpa;
 
@@ -303,61 +542,112 @@ public:
         trenutniCvor = minimalni.first;
       }
     }
-    return posjecen[cvor2].second;
+    if(posjecen[cvor2].first == true)
+      return posjecen[cvor2].second;
+    else
+      throw std::domain_error("Put izmedju ova dva cvora ne postoji");
   }
-  double ShortestPathFibonacciHeap(int cvor1, int cvor2) {
-    std::vector<std::pair<bool,double>> posjecen(cvorovi.size(), {false, std::numeric_limits<double>::infinity()});
-    FibHeap hrpa;
+double ShortestPathFibonacciHeap(int cvor1, int cvor2) {
+    if(cvor2 > cvorovi.size() || cvor1 > cvorovi.size() || cvor2 < 0 || cvor1 < 0)
+      throw std::domain_error("Cvor ne postoji!");
+    std::vector<double> dist(cvorovi.size(), std::numeric_limits<double>::infinity());
 
-    int trenutniCvor = cvor1;
-    posjecen[trenutniCvor] = {true, 0};
+    // 2. KLJUČ: Niz pokazivača (handles) koji nam kaže gdje se koji čvor nalazi u gomili
+    // Ako je handles[i] == nullptr, čvor i nije u gomili.
+    std::vector<FibHeap<double>::FibNode*> handles(cvorovi.size(), nullptr);
 
-    while(posjecen[cvor2].first == false){
-      for(int i = 0; i < cvorovi[trenutniCvor].size(); i++) {
-        hrpa.decreaseKey(cvorovi[trenutniCvor][i].first, posjecen[trenutniCvor].second+cvorovi[trenutniCvor][i].second);
-      }
-      FibNode* minimalni = hrpa.extractMin();
-      if(posjecen[minimalni->key].first == false) {
-        posjecen[minimalni->key] = {true, minimalni->value};
-        trenutniCvor = minimalni->key;
-      }else {
-        while(posjecen[minimalni->key].first == true)
-          minimalni = hrpa.extractMin();
-        posjecen[minimalni->key] = {true, minimalni->value};
-        trenutniCvor = minimalni->key;
-      }
+    FibHeap<double> hrpa;
+
+    // Postavljamo početni čvor
+    dist[cvor1] = 0;
+    handles[cvor1] = hrpa.push(0.0, (void*)(intptr_t)cvor1);
+
+    while (!hrpa.empty()) {
+        FibHeap<double>::FibNode* minimalni = hrpa.extract_min();
+        if (!minimalni) break;
+
+        // Dobijamo ID čvora iz payload-a (ono što smo spremili pri push-u)
+        int u = (int)(intptr_t)minimalni->payload;
+        double trenutnaDistanca = minimalni->key;
+
+        // VAŽNO: Pošto je izbačen iz gomile, poništavamo njegovu adresu u handles
+        handles[u] = nullptr;
+
+        // Obavezno obrisati memoriju jer extract_min samo izbacuje, ne briše objekat
+        delete minimalni;
+
+        // Ako smo stigli do cilja, možemo odmah vratiti rezultat
+        if (u == cvor2) return dist[cvor2];
+
+        // Ako smo izvukli distancu koja je veća od već pronađene, preskoči (optimizacija)
+        if (trenutnaDistanca > dist[u]) continue;
+
+        // Prođi kroz sve susjede čvora u
+        for (auto& susjed : cvorovi[u]) {
+            int v = susjed.first;
+            double tezinaIvice = susjed.second;
+            double novaDistanca = dist[u] + tezinaIvice;
+
+            // Ako smo pronašli bolji put do susjeda v
+            if (novaDistanca < dist[v]) {
+                dist[v] = novaDistanca;
+
+                if (handles[v] == nullptr) {
+                    // AKO NE POSTOJI u gomili -> UBACI GA (Insert)
+                    // Spremamo vraćenu adresu u handles[v]
+                    handles[v] = hrpa.push(dist[v], (void*)(intptr_t)v);
+                }
+                else {
+                    // AKO VEĆ POSTOJI u gomili -> SAMO PREPRAVI (Decrease Key)
+                    // Koristimo sačuvanu adresu iz handles[v] da bi bilo O(1)
+                    hrpa.decrease_key(handles[v], dist[v]);
+                }
+            }
+        }
     }
-    return posjecen[cvor2].second;
-  }
+    if (dist[cvor2] == std::numeric_limits<double>::infinity()) {
+        return -1.0; // Vraćamo "malu" negativnu vrijednost kao signal za "nema puta"
+    }
+    return dist[cvor2];
+}
 };
 int main()
 {
-   // ----------------- Testiranje sa Binary Heap -----------------
-    std::vector<std::vector<std::pair<int, double>>> listaSusjedstva = {
-        { {1, 1}, {2, 3}, {3, 6}, {4, 10}, {5, 15} },
-        { {0, 1}, {2, 2}, {3, 5}, {4, 9}, {5, 14} },
-        { {0, 3}, {1, 2}, {3, 3}, {4, 7}, {5, 12} },
-        { {0, 6}, {1, 5}, {2, 3}, {4, 4}, {5, 9} },
-        { {0, 10}, {1, 9}, {2, 7}, {3, 4}, {5, 5} },
-        { {0, 15}, {1, 14}, {2, 12}, {3, 9}, {4, 5} }
-    };
-    Graf mojGraf(listaSusjedstva);
-    std::cout << "Binary Heap Test 1:\n";
-    std::cout << mojGraf.ShortestPathBinaryHeap(1,4) << " ";
-    std::cout << mojGraf.ShortestPathFibonacciHeap(1,4);
 
-    std::vector<std::vector<std::pair<int, double>>> listaSusjedstva2 = {
-        { {1, 3}, {2, 5} },
-        { {3, 2}, {4, 4} },
-        { },
-        { {2, 7}, {4, 2}, {5, 3} },
-        { {6, 2} },
-        { {6, 4} },
-        { }
-    };
-    std::cout << "Binary Heap Test 2:\n";
-    Graf mojGraf2(listaSusjedstva2);
-    std::cout << mojGraf2.ShortestPathBinaryHeap(0,6) << " ";
-    std::cout << mojGraf2.ShortestPathFibonacciHeap(0,6);
+  std::vector<std::vector<std::pair<int, double>>> listaSusjedstva1 = {
+    {{4, 0.38}, {2, 0.26}}, // Cvor 0
+    {{3, 0.29}}, // Cvor 1
+    {{7, 0.34}}, // Cvor 2
+    {{6, 0.52}}, // Cvor 3
+    {{5, 0.35}, {7, 0.37}}, // Cvor 4
+    {{4, 0.35}, {7, 0.28}, {1, 0.32}}, // Cvor 5
+    {{2, 0.4}, {0, 0.58}, {4, 0.93}}, // Cvor 6
+    {{5, 0.28}, {3, 0.39}} // Cvor 7
+  };
+
+    Graf mojGraf(listaSusjedstva1);
+    std::cout << "Binary Heap Test 1:\n";
+
+    auto startBinary = std::chrono::high_resolution_clock::now();
+    std::cout << mojGraf.ShortestPathBinaryHeap(0, 7) << " ";
+    auto endBinary = std::chrono::high_resolution_clock::now();
+
+
+
+    std::chrono::duration<double, std::milli> timeBinary = endBinary - startBinary;
+
+    std::cout << "(Time: " << timeBinary.count() << " ms)\n";
+
+
+
+    std::cout << "Fibonacci Heap Test:\n";
+    auto startFibo = std::chrono::high_resolution_clock::now();
+    std::cout <<mojGraf.ShortestPathFibonacciHeap(0, 7)<<" ";
+
+    auto endFibo = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> timeFibo = endFibo - startFibo;
+
+    std::cout << "(Time: " << timeFibo.count() << " ms)\n";
     return 0;
 }
